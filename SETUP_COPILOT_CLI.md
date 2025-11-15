@@ -1,0 +1,44 @@
+# Copilot CLI Setup (One-Time Login)
+
+This utility depends on the GitHub Copilot CLI to answer questions. Even though we persist the `COPILOT_REQUESTS_PAT` token, you *must* complete the Copilot CLI's one-time login flow so the CLI trusts the PAT. Follow these steps the first time you set up a new workstation:
+
+1. **Open a fresh PowerShell window**
+   - Launch Windows PowerShell (not the integrated VS Code terminal).
+   - Run:
+     ````powershell
+     Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+     ````
+
+2. **Start the Copilot CLI**
+   - Run:
+     ````powershell
+     copilot
+     ````
+   - When prompted to trust `C:\x_runner_x`, choose **1** (or **2** if you want the CLI to remember the folder). If you see multi-line keybinding prompts, accept them.
+
+3. **Authenticate once**
+   - At the Copilot prompt, run:
+     ````
+     /login
+     ````
+   - Paste the fine-grained PAT that contains the **Copilot Requests** permission (the same one stored via `set_persistent_env_var`).
+   - Wait for the success confirmation (the CLI stores the token).
+
+4. **Exit the CLI**
+   - Press `Ctrl+C` to leave the interactive session.
+
+5. **Verify the helper**
+   - Back in your working shell (with the virtual environment activated), run:
+     ````powershell
+     $env:PYTHONPATH="C:/x_runner_x"
+     & C:/x_runner_x/.venv/Scripts/python.exe C:/x_runner_x/x_make_who_is_John_Connor_x/who_is_jc.py
+     ````
+   - The script should now return a JSON dictionary with `question` and `answer` fields. If the answer is still empty, reopen an interactive Copilot session and confirm `/login` succeeded.
+
+## Troubleshooting
+
+- **"No authentication information found"**: The CLI did not pick up the PAT. Repeat step 3 to run `/login` and paste the PAT again.
+- **Execution policy errors**: Always run `Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass` before launching `copilot`. This only affects the current PowerShell session.
+- **Switching machines**: Repeat this entire process on each new machine. The persisted PAT gets you halfway there, but the CLI requires a per-machine trust handshake.
+
+Once the Copilot CLI is authenticated, the John Connor helper script (`who_is_jc.py`) can query Copilot without prompting for credentials.
