@@ -67,7 +67,7 @@ def _failure(code: int, message: str) -> tuple[int, str, str]:
     return code, "", f"{message}\n"
 
 
-def _query_copilot_http(question: str, token: str) -> str:
+def _query_copilot_http(question: str, token: str, *, model: str | None = None) -> tuple[str, dict[str, object]]:
     endpoint = os.environ.get(
         "COPILOT_API_URL",
         "https://copilot-proxy.githubusercontent.com/v1/chat/completions",
@@ -81,7 +81,7 @@ def _query_copilot_http(question: str, token: str) -> str:
         "OpenAI-Intent": "conversation-panel",
     }
     payload = {
-        "model": os.environ.get("COPILOT_MODEL", "gpt-4o-mini"),
+        "model": model or os.environ.get("COPILOT_MODEL", "gpt-4o-mini"),
         "messages": [
             {
                 "role": "system",
@@ -100,7 +100,8 @@ def _query_copilot_http(question: str, token: str) -> str:
     request = urllib.request.Request(endpoint, data=data, headers=headers, method="POST")
     try:
         with urllib.request.urlopen(request, timeout=60) as response:
-            body = response.read().decode("utf-8")
+            raw_bytes = response.read()
+            body = raw_bytes.decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore") if exc.fp else exc.reason
         raise RuntimeError(f"Copilot HTTP request failed ({exc.code}): {detail}")
@@ -122,7 +123,7 @@ def _query_copilot_http(question: str, token: str) -> str:
     content = message.get("content")
     if not isinstance(content, str):
         raise RuntimeError("Copilot HTTP response did not include text content")
-    return content.strip()
+    return content.strip(), payload
 
 
 def _path_variants(executable_names: list[str]) -> list[str]:
@@ -300,52 +301,6 @@ def _install_copilot_cli_via_npm() -> bool:
 
     sys.stderr.write("GitHub Copilot CLI installed via npm.\n")
     return True
-
-
-def _find_pwsh() -> str | None:
-    for candidate in ("pwsh", "pwsh.exe", "powershell", "powershell.exe"):
-        found = shutil.which(candidate)
-        if found:
-            return found
-    system32 = os.path.join(os.environ.get("SystemRoot", r"C:\\Windows"), "System32")
-    fallback = os.path.join(system32, "WindowsPowerShell", "v1.0", "powershell.exe")
-    if os.path.exists(fallback):
-        return fallback
-    return None
-
-
-def _find_node() -> str | None:
-    for candidate in ("node", "node.exe"):
-        found = shutil.which(candidate)
-        if found:
-            return found
-    program_files = os.environ.get("ProgramFiles", r"C:\\Program Files")
-    fallback = os.path.join(program_files, "nodejs", "node.exe")
-    if os.path.exists(fallback):
-        return fallback
-    return None
-
-
-def _copilot_cli_launcher(executable: str) -> list[str] | None:
-    lower = executable.lower()
-    if lower.endswith((".exe", ".com")):
-        return [executable]
-    if lower.endswith((".cmd", ".bat")):
-        return [os.environ.get("COMSPEC", "cmd.exe"), "/c", executable]
-    if lower.endswith(".ps1"):
-        pwsh = _find_pwsh()
-        if pwsh is None:
-            sys.stderr.write(
-                "PowerShell v6+ was not located on PATH. Install PowerShell 7 (pwsh) to use the Copilot CLI PowerShell shim.\n"
-            )
-            return None
-        return [pwsh, "-NoProfile", "-ExecutionPolicy", "Bypass", "-File", executable]
-
-    node = _find_node()
-    if node is None:
-        sys.stderr.write("Node.js >= 22.0.0 was not found on PATH. Install it and retry.\n")
-        return None
-    return [node, executable]
 
 
 def _install_gh_cli_via_msi() -> bool:
@@ -548,7 +503,7 @@ def _is_auth_error(output: str) -> bool:
     )
     return any(indicator in lowered for indicator in indicators)
 
-def _run_copilot_cli(prompt: str) -> tuple[int, str, str]:
+def _run_copilot_cli(prompt: str, *, model: str | None = None) -> tuple[int, str, str]:
     exe = _find_copilot_cli_executable()
     if exe is None:
         if not _install_copilot_cli():
@@ -568,10 +523,13 @@ def _run_copilot_cli(prompt: str) -> tuple[int, str, str]:
 
     exe_literal = _ps_quote(exe)
     prompt_literal = _ps_quote(prompt_payload)
-    command_text = (
-        "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; "
-        f"& {exe_literal} --prompt {prompt_literal} --allow-all-tools --stream off --no-color"
-    )
+    command_parts = [
+        "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; ",
+        f"& {exe_literal} --prompt {prompt_literal} --allow-all-tools --stream off --no-color",
+    ]
+    if model:
+        command_parts.append(f" --model { _ps_quote(model) }")
+    command_text = "".join(command_parts)
 
     def execute(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         return subprocess.run(
@@ -593,6 +551,8 @@ def _run_copilot_cli(prompt: str) -> tuple[int, str, str]:
         else:
             env = dict(os.environ)
         next_prompt = False
+        if model:
+            env["COPILOT_MODEL"] = model
         result = execute(env)
         stdout = result.stdout or ""
         stderr = result.stderr or ""
@@ -683,10 +643,10 @@ def _ensure_gh_auth(gh_exe: str) -> bool:
     return False
 
 
-def run_copilot_query(prompt: str) -> tuple[int, str, str]:
+def run_copilot_query(prompt: str, *, model: str | None = None) -> tuple[int, str, str]:
     """Invoke Copilot CLI flows and return (exit_code, stdout, stderr)."""
 
-    code, stdout, stderr = _run_copilot_cli(prompt)
+    code, stdout, stderr = _run_copilot_cli(prompt, model=model)
     if code == 0 or code not in (128, 127):
         return code, stdout, stderr
 
@@ -720,28 +680,66 @@ def run_copilot_query(prompt: str) -> tuple[int, str, str]:
     return result.returncode, result.stdout or "", result.stderr or ""
 
 
-def query_copilot(question: str = PROMPT) -> dict[str, str]:
-    """Return a dictionary containing the question and Copilot's answer."""
+def query_copilot(
+    question: str = PROMPT,
+    *,
+    model: str | None = None,
+    language: str | None = None,
+) -> dict[str, object]:
+    """Return a dictionary containing the question, answer, and diagnostics."""
 
-    code, stdout, stderr = run_copilot_query(question)
+    effective_question = _apply_language_directive(question, language)
+    code, stdout, stderr = run_copilot_query(effective_question, model=model)
     answer = stdout.strip()
     message = stderr.strip() if stderr else ""
+    model_effective = model or os.environ.get("COPILOT_MODEL") or "default"
+    cli_report: dict[str, object] = {
+        "returncode": code,
+        "stdout": stdout,
+        "stderr": stderr,
+        "model": model_effective,
+        "language": language,
+    }
+
+    if code == 0 and answer:
+        return {
+            "question": question,
+            "answer": answer,
+            "source": "cli",
+            "model": model_effective,
+            "cli": cli_report,
+            "language": language,
+        }
+
     if code != 0:
         detail = message or stdout.strip() or f"Copilot CLI exited with status {code}"
         raise RuntimeError(detail)
-    if answer:
-        return {"question": question, "answer": answer}
 
     token = _resolve_token()
-    if token:
+    fallback_raw = os.environ.get("COPILOT_HTTP_FALLBACK")
+    if fallback_raw is None:
+        fallback_allowed = True
+    else:
+        fallback_allowed = fallback_raw.strip().lower() in {"1", "true", "yes", "on", "y"}
+    if token and fallback_allowed:
         try:
-            answer = _query_copilot_http(question, token)
+            http_answer, http_payload = _query_copilot_http(effective_question, token, model=model)
         except Exception as exc:  # noqa: BLE001 - fallback path
             if not message:
                 message = str(exc)
         else:
-            if answer:
-                return {"question": question, "answer": answer}
+            if http_answer:
+                return {
+                    "question": question,
+                    "answer": http_answer,
+                    "source": "http",
+                    "model": http_payload.get("model", model_effective),
+                    "cli": cli_report,
+                    "http": {
+                        "request": http_payload,
+                    },
+                    "language": language,
+                }
     detail = message or "Copilot returned an empty response. Run `copilot` interactively and complete `/login` once to authorize this PAT."
     raise RuntimeError(detail)
 
@@ -755,8 +753,23 @@ def main() -> None:
     except RuntimeError as exc:
         sys.stderr.write(f"{exc}\n")
         sys.exit(1)
-    pprint(result)
+    printable = {"question": result["question"], "answer": result["answer"]}
+    pprint(printable)
 
 
 if __name__ == "__main__":
     main()
+
+
+def _apply_language_directive(question: str, language: str | None) -> str:
+    if not language:
+        return question
+    lang = language.strip().lower()
+    if lang.startswith("es"):
+        return (
+            question
+            + "\n\nResponde en español latino, claro, cálido y con empatía. Si el contenido incluye nombres propios en otro idioma, consérvalos."
+        )
+    if lang.startswith("en"):
+        return question + "\n\nPlease answer in clear, friendly English suitable for all ages."
+    return question + f"\n\nPlease answer in {language} with warmth and clarity."
