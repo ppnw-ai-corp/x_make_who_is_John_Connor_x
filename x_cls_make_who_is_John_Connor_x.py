@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
+import importlib
 import json
 import os
 import sys
 from collections.abc import Mapping
 from contextlib import contextmanager
 from pathlib import Path
-from typing import Any
+from typing import Any, cast
 
 if __package__ in {None, ""}:  # pragma: no cover - executed when run as script
     sys.path.append(str(Path(__file__).resolve().parent))
@@ -28,11 +29,14 @@ VALID_COPILOT_MODELS: tuple[str, ...] = (
 )
 
 try:  # pragma: no cover - optional dependency
-    from x_make_copilot_cli_one_time_setup_x import (  # type: ignore[import-not-found]
-        x_cls_make_copilot_cli_one_time_setup_x,
-    )
+    _copilot_setup_module = importlib.import_module("x_make_copilot_cli_one_time_setup_x")
 except ImportError:  # pragma: no cover - helper not available in all environments
-    x_cls_make_copilot_cli_one_time_setup_x = None  # type: ignore[assignment]
+    CopilotSetupHelper: type[Any] | None = None
+else:
+    CopilotSetupHelper = cast(
+        "type[Any] | None",
+        getattr(_copilot_setup_module, "x_cls_make_copilot_cli_one_time_setup_x", None),
+    )
 
 
 def _bool_option(payload: Mapping[str, Any], key: str, default: bool = False) -> bool:
@@ -144,13 +148,13 @@ class x_cls_make_who_is_John_Connor_x:  # noqa: N801 - legacy public API
                     },
                 }
                 if attempt_setup:
-                    if x_cls_make_copilot_cli_one_time_setup_x is None:
+                    if CopilotSetupHelper is None:
                         result["setup"] = {
                             "status": "unavailable",
                             "message": "Copilot setup helper package is not installed.",
                         }
                     else:
-                        setup_report = x_cls_make_copilot_cli_one_time_setup_x().run(setup_options)
+                        setup_report = CopilotSetupHelper().run(setup_options)
                         result["setup"] = setup_report
                 return result
 
