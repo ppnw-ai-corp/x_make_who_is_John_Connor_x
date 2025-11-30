@@ -11,11 +11,14 @@ from contextlib import contextmanager
 from pathlib import Path
 from typing import Any, cast
 
-if __package__ in {None, ""}:  # pragma: no cover - executed when run as script
-    sys.path.append(str(Path(__file__).resolve().parent))
-    import who_is_jc  # type: ignore[import]
-else:
+try:
     from . import who_is_jc
+except ImportError:  # pragma: no cover - executed when run as script
+    repo_root = Path(__file__).resolve().parent
+    sys.path.append(str(repo_root.parent))
+    who_is_jc = importlib.import_module(  # type: ignore[assignment]
+        "x_make_who_is_John_Connor_x.who_is_jc"
+    )
 
 
 VALID_COPILOT_MODELS: tuple[str, ...] = (
