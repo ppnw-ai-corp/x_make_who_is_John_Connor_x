@@ -17,6 +17,8 @@ After the handshake succeeds, re-run `who_is_jc.py` to verify that answers
 flow without further prompts.
 """
 
+# ruff: noqa: N999  # Uppercase filename is intentional to signal manual execution.
+
 from __future__ import annotations
 
 import getpass
@@ -24,11 +26,22 @@ import os
 import shutil
 import subprocess
 import sys
+from itertools import chain
+from typing import cast
 
-PAT_ENV_KEYS = (
+PAT_ENV_KEYS: tuple[str, ...] = (
     "COPILOT_REQUESTS_PAT",
     "GH_TOKEN",
     "GITHUB_TOKEN",
+)
+
+ADDITIONAL_COPILOT_ENV_KEYS: tuple[str, ...] = (
+    "COPILOT_REQUESTS_TOKEN",
+    "COPILOT_TOKEN",
+    "COPILOT_PAT",
+    "COPILOT_GITHUB_TOKEN",
+    "GITHUB_COPILOT_TOKEN",
+    "GH_COPILOT_TOKEN",
 )
 
 
@@ -68,14 +81,7 @@ def _ensure_copilot_cli() -> str | None:
 
 def _build_env(pat: str) -> dict[str, str]:
     env = dict(os.environ)
-    for key in PAT_ENV_KEYS + (
-        "COPILOT_REQUESTS_TOKEN",
-        "COPILOT_TOKEN",
-        "COPILOT_PAT",
-        "COPILOT_GITHUB_TOKEN",
-        "GITHUB_COPILOT_TOKEN",
-        "GH_COPILOT_TOKEN",
-    ):
+    for key in chain(PAT_ENV_KEYS, ADDITIONAL_COPILOT_ENV_KEYS):
         env[key] = pat
     env.setdefault("COPILOT_ALLOW_ALL", "1")
     env.setdefault("COPILOT_CLI_ALLOW_UNSAFE", "1")
@@ -102,20 +108,25 @@ def _run_probe(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
             timeout=20,
         )
     except subprocess.TimeoutExpired as exc:
-        stdout = exc.stdout or ""
-        stderr = (
+        stdout_raw = exc.stdout or ""
+        stderr_raw = (
             exc.stderr or "Probe timed out (Copilot CLI likely awaits trust or /login)."
         )
-        if isinstance(stdout, bytes):
-            stdout = stdout.decode("utf-8", "replace")
-        if isinstance(stderr, bytes):
-            stderr = stderr.decode("utf-8", "replace")
-        return subprocess.CompletedProcess(
+        if isinstance(stdout_raw, bytes):
+            stdout_text = stdout_raw.decode("utf-8", "replace")
+        else:
+            stdout_text = stdout_raw
+        if isinstance(stderr_raw, bytes):
+            stderr_text = stderr_raw.decode("utf-8", "replace")
+        else:
+            stderr_text = stderr_raw
+        failure = subprocess.CompletedProcess(
             args=exc.cmd,
             returncode=-999,
-            stdout=stdout,
-            stderr=stderr,
+            stdout=stdout_text,
+            stderr=stderr_text,
         )
+        return cast("subprocess.CompletedProcess[str]", failure)
 
 
 def _launch_interactive(env: dict[str, str]) -> None:
