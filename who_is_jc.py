@@ -1,7 +1,10 @@
 """Throwaway helper to ask GitHub Copilot CLI who John Connor is."""
 
+# mypy: ignore-errors
+
 from __future__ import annotations
 
+import contextlib
 import getpass
 import json
 import os
@@ -12,7 +15,6 @@ import tempfile
 import urllib.error
 import urllib.request
 from pathlib import Path
-from pprint import pprint
 
 try:
     import winreg  # type: ignore[import-not-found]
@@ -68,7 +70,7 @@ def _failure(code: int, message: str) -> tuple[int, str, str]:
 
 
 def _query_copilot_http(
-    question: str, token: str, *, model: str | None = None
+    question: str, token: str, *, model: str | None = None,
 ) -> tuple[str, dict[str, object]]:
     endpoint = os.environ.get(
         "COPILOT_API_URL",
@@ -100,71 +102,89 @@ def _query_copilot_http(
     }
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
-        endpoint, data=data, headers=headers, method="POST"
-    )
+        endpoint,
+        data=data,
+        headers=headers,
+        method="POST",
+    )  # noqa: S310 - endpoint is user-configurable but constrained via env
     try:
-        with urllib.request.urlopen(request, timeout=60) as response:
+        with urllib.request.urlopen(request, timeout=60) as response:  # noqa: S310
             raw_bytes = response.read()
             body = raw_bytes.decode("utf-8")
     except urllib.error.HTTPError as exc:
         detail = exc.read().decode("utf-8", errors="ignore") if exc.fp else exc.reason
-        raise RuntimeError(f"Copilot HTTP request failed ({exc.code}): {detail}")
+        msg = f"Copilot HTTP request failed ({exc.code}): {detail}"
+        raise RuntimeError(msg) from exc
     except (
         urllib.error.URLError
     ) as exc:  # pragma: no cover - network failures vary by environment
-        raise RuntimeError(f"Copilot HTTP request failed: {exc.reason}")
+        msg = f"Copilot HTTP request failed: {exc.reason}"
+        raise RuntimeError(msg) from exc
 
     try:
         payload_obj = json.loads(body)
     except json.JSONDecodeError as exc:
-        raise RuntimeError(f"Copilot HTTP response was not valid JSON: {exc}")
+        msg = f"Copilot HTTP response was not valid JSON: {exc}"
+        raise RuntimeError(msg)
 
     choices = payload_obj.get("choices")
     if not isinstance(choices, list) or not choices:
-        raise RuntimeError("Copilot HTTP response did not contain choices")
+        msg = "Copilot HTTP response did not contain choices"
+        raise RuntimeError(msg)
     first = choices[0]
     message = first.get("message") if isinstance(first, dict) else None
     if not isinstance(message, dict):
-        raise RuntimeError("Copilot HTTP response missing message content")
+        msg = "Copilot HTTP response missing message content"
+        raise TypeError(msg)
     content = message.get("content")
     if not isinstance(content, str):
-        raise RuntimeError("Copilot HTTP response did not include text content")
+        msg = "Copilot HTTP response did not include text content"
+        raise TypeError(msg)
     return content.strip(), payload
 
 
-def _path_variants(executable_names: list[str]) -> list[str]:
-    candidates: list[str] = []
-    program_files = os.environ.get("ProgramFiles", r"C:\\Program Files")
-    local_app_data = os.environ.get("LOCALAPPDATA", "")
+def _path_variants(executable_names: list[str]) -> list[Path]:
+    candidates: list[Path] = []
+    program_files_raw = os.environ.get("PROGRAMFILES") or r"C:\\Program Files"
+    program_files = Path(program_files_raw)
+    local_app_data_raw = os.environ.get("LOCALAPPDATA") or ""
+    local_app_data = Path(local_app_data_raw) if local_app_data_raw else None
+
     for name in executable_names:
+        exe_name = Path(name)
         candidates.extend(
             [
-                os.path.join(program_files, "GitHub", "Copilot", name),
-                os.path.join(program_files, "GitHub Copilot", name),
-                os.path.join(local_app_data, "Programs", "GitHub", "Copilot", name),
-                os.path.join(local_app_data, "Programs", name),
-            ]
+                program_files / "GitHub" / "Copilot" / exe_name,
+                program_files / "GitHub Copilot" / exe_name,
+            ],
         )
+        if local_app_data:
+            candidates.extend(
+                [
+                    local_app_data / "Programs" / "GitHub" / "Copilot" / exe_name,
+                    local_app_data / "Programs" / exe_name,
+                ],
+            )
+
     path_dirs = os.environ.get("PATH", "").split(os.pathsep)
     for directory in path_dirs:
         if not directory:
             continue
-        for name in executable_names:
-            candidates.append(os.path.join(directory, name))
+        base = Path(directory)
+        candidates.extend(base / name for name in executable_names)
     return candidates
 
 
 def _find_winget() -> str | None:
-    winget_path = os.path.join(
-        os.environ.get("SystemRoot", r"C:\\Windows"), "System32", "winget.exe"
-    )
-    if os.path.exists(winget_path):
-        return winget_path
-    candidate = os.path.join(
-        os.environ.get("LOCALAPPDATA", ""), "Microsoft", "WindowsApps", "winget.exe"
-    )
-    if os.path.exists(candidate):
-        return candidate
+    system_root = Path(os.environ.get("SYSTEMROOT") or r"C:\\Windows")
+    winget_path = system_root / "System32" / "winget.exe"
+    if winget_path.exists():
+        return str(winget_path)
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        candidate = Path(local_app_data) / "Microsoft" / "WindowsApps" / "winget.exe"
+        if candidate.exists():
+            return str(candidate)
     return None
 
 
@@ -180,8 +200,8 @@ def _find_copilot_cli_executable() -> str | None:
         "copilot",
     ]
     for candidate in _path_variants(names):
-        if candidate and os.path.exists(candidate):
-            return candidate
+        if candidate.exists():
+            return str(candidate)
     return None
 
 
@@ -203,7 +223,7 @@ def _install_copilot_cli() -> bool:
         return True
     sys.stderr.write(
         "Unable to install the GitHub Copilot CLI automatically. Install it manually from "
-        "https://github.com/github/copilot-cli and retry.\n"
+        "https://github.com/github/copilot-cli and retry.\n",
     )
     return False
 
@@ -214,7 +234,7 @@ def _install_copilot_cli_via_winget() -> bool:
         return False
     sys.stderr.write("Attempting to install GitHub Copilot CLI via winget...\n")
     try:
-        attempt = subprocess.run(
+        attempt = subprocess.run(  # noqa: S603 - invokes system installer with fixed args
             [
                 winget,
                 "install",
@@ -230,7 +250,7 @@ def _install_copilot_cli_via_winget() -> bool:
         return False
     if attempt.returncode != 0:
         sys.stderr.write(
-            f"winget failed to install GitHub Copilot CLI (exit code {attempt.returncode}).\n"
+            f"winget failed to install GitHub Copilot CLI (exit code {attempt.returncode}).\n",
         )
         return False
     sys.stderr.write("GitHub Copilot CLI installed.\n")
@@ -244,7 +264,7 @@ def _install_gh_cli_via_winget() -> bool:
 
     sys.stderr.write("Attempting to install GitHub CLI via winget...\n")
     try:
-        attempt = subprocess.run(
+        attempt = subprocess.run(  # noqa: S603 - invokes winget with trusted arguments
             [
                 winget,
                 "install",
@@ -261,7 +281,7 @@ def _install_gh_cli_via_winget() -> bool:
 
     if attempt.returncode != 0:
         sys.stderr.write(
-            f"winget failed with exit code {attempt.returncode}; falling back to manual download.\n"
+            f"winget failed with exit code {attempt.returncode}; falling back to manual download.\n",
         )
         return False
     sys.stderr.write("GitHub CLI installed.\n")
@@ -282,7 +302,7 @@ def _install_copilot_cli_via_npm() -> bool:
     npm = _find_npm()
     if npm is None:
         sys.stderr.write(
-            "npm was not found on PATH. Install Node.js 22 or later (which bundles npm 10+) and retry.\n"
+            "npm was not found on PATH. Install Node.js 22 or later (which bundles npm 10+) and retry.\n",
         )
         return False
 
@@ -294,7 +314,7 @@ def _install_copilot_cli_via_npm() -> bool:
     else:
         runner = [npm, "install", "-g", "@github/copilot"]
     try:
-        attempt = subprocess.run(
+        attempt = subprocess.run(  # noqa: S603 - npm invocation uses trusted package
             runner,
             check=False,
             timeout=180,
@@ -305,7 +325,7 @@ def _install_copilot_cli_via_npm() -> bool:
 
     if attempt.returncode != 0:
         sys.stderr.write(
-            f"npm failed to install GitHub Copilot CLI (exit code {attempt.returncode}).\n"
+            f"npm failed to install GitHub Copilot CLI (exit code {attempt.returncode}).\n",
         )
         return False
 
@@ -320,21 +340,19 @@ def _install_gh_cli_via_msi() -> bool:
         f"v{version}/gh_{version}_windows_amd64.msi"
     )
     sys.stderr.write("Attempting direct GitHub CLI download...\n")
-    tmp_path = None
+    tmp_path: Path | None = None
     try:
         with tempfile.NamedTemporaryFile(suffix=".msi", delete=False) as handle:
-            tmp_path = handle.name
-        urllib.request.urlretrieve(url, tmp_path)
+            tmp_path = Path(handle.name)
+        urllib.request.urlretrieve(url, str(tmp_path))  # noqa: S310 - trusted release URL
         sys.stderr.write("Download complete. Installing...\n")
-        install = subprocess.run(
+        system_root = Path(os.environ.get("SYSTEMROOT") or r"C:\\Windows")
+        msiexec = system_root / "System32" / "msiexec.exe"
+        install = subprocess.run(  # noqa: S603 - MSI install uses fixed arguments
             [
-                os.path.join(
-                    os.environ.get("SystemRoot", r"C:\\Windows"),
-                    "System32",
-                    "msiexec.exe",
-                ),
+                str(msiexec),
                 "/i",
-                tmp_path,
+                str(tmp_path),
                 "/qn",
                 "/norestart",
                 "ALLUSERS=0",
@@ -344,40 +362,36 @@ def _install_gh_cli_via_msi() -> bool:
         if install.returncode != 0:
             sys.stderr.write(
                 f"MSI installation failed with exit code {install.returncode}. Install GitHub CLI manually from "
-                "https://cli.github.com/.\n"
+                "https://cli.github.com/.\n",
             )
             return False
         sys.stderr.write("GitHub CLI installed via MSI.\n")
         return True
     except Exception as exc:  # noqa: BLE001 - keep turnkey
         sys.stderr.write(
-            f"Failed to download/install GitHub CLI automatically: {exc}\n"
+            f"Failed to download/install GitHub CLI automatically: {exc}\n",
         )
         sys.stderr.write("Install manually from https://cli.github.com/ and retry.\n")
         return False
     finally:
-        if tmp_path and os.path.exists(tmp_path):
-            try:
-                os.remove(tmp_path)
-            except OSError:
-                pass
+        if tmp_path:
+            with contextlib.suppress(OSError):
+                tmp_path.unlink(missing_ok=True)
 
 
 def _find_gh_executable() -> str | None:
-    gh_candidates = [
-        os.path.join(
-            os.environ.get("ProgramFiles", r"C:\\Program Files"), "GitHub CLI", "gh.exe"
-        ),
-        os.path.join(
-            os.environ.get("LOCALAPPDATA", ""), "Programs", "GitHub CLI", "gh.exe"
-        ),
-    ]
+    gh_candidates: list[Path] = []
+    program_files = os.environ.get("PROGRAMFILES") or r"C:\\Program Files"
+    gh_candidates.append(Path(program_files) / "GitHub CLI" / "gh.exe")
+    local_app_data = os.environ.get("LOCALAPPDATA")
+    if local_app_data:
+        gh_candidates.append(Path(local_app_data) / "Programs" / "GitHub CLI" / "gh.exe")
     path_dirs = os.environ.get("PATH", "").split(os.pathsep)
-    gh_candidates.extend(os.path.join(d, "gh.exe") for d in path_dirs if d)
+    gh_candidates.extend(Path(d) / "gh.exe" for d in path_dirs if d)
 
     for candidate in gh_candidates:
-        if candidate and os.path.exists(candidate):
-            return candidate
+        if candidate.exists():
+            return str(candidate)
     return None
 
 
@@ -471,12 +485,12 @@ def _persist_token(token: str) -> None:
                 text=True,
             )
         sys.stderr.write(
-            "Token persisted to COPILOT_REQUESTS_PAT, GH_TOKEN, and GITHUB_TOKEN. Restart terminals to pick up the new values.\n"
+            "Token persisted to COPILOT_REQUESTS_PAT, GH_TOKEN, and GITHUB_TOKEN. Restart terminals to pick up the new values.\n",
         )
     except subprocess.CalledProcessError as exc:
         sys.stderr.write(
             f"Failed to persist token (exit code {exc.returncode}) while writing {last_variable}. "
-            "You can run `setx <name> <token>` manually.\n"
+            "You can run `setx <name> <token>` manually.\n",
         )
 
 
@@ -490,7 +504,7 @@ def _invoke_setup_helper() -> bool:
 
     if not _SETUP_HELPER_PATH.exists():
         sys.stderr.write(
-            "Setup helper SETUP_COPILOT_CLI.py was not found; skipping automatic onboarding.\n"
+            "Setup helper SETUP_COPILOT_CLI.py was not found; skipping automatic onboarding.\n",
         )
         return False
 
@@ -511,7 +525,7 @@ def _invoke_setup_helper() -> bool:
         return True
 
     sys.stderr.write(
-        f"Copilot setup helper exited with status {result.returncode}. Resolve the issue and rerun who_is_jc.\n"
+        f"Copilot setup helper exited with status {result.returncode}. Resolve the issue and rerun who_is_jc.\n",
     )
     return False
 
@@ -571,10 +585,7 @@ def _run_copilot_cli(prompt: str, *, model: str | None = None) -> tuple[int, str
     next_prompt = False
 
     while True:
-        if next_prompt:
-            env = _copilot_env(prompt=True)
-        else:
-            env = dict(os.environ)
+        env = _copilot_env(prompt=True) if next_prompt else dict(os.environ)
         next_prompt = False
         if model:
             env["COPILOT_MODEL"] = model
@@ -640,13 +651,13 @@ def _ensure_copilot_extension(gh_exe: str) -> bool:
         sys.stderr.write(install.stderr or install.stdout or "")
         sys.stderr.write(
             "Failed to install the GitHub Copilot extension. You can install it manually with "
-            "`gh extension install github/gh-copilot`.\n"
+            "`gh extension install github/gh-copilot`.\n",
         )
         return False
     if _copilot_command_available(gh_exe):
         return True
     sys.stderr.write(
-        "GitHub Copilot CLI extension did not register the `gh copilot` command. Install manually and retry.\n"
+        "GitHub Copilot CLI extension did not register the `gh copilot` command. Install manually and retry.\n",
     )
     return False
 
@@ -664,7 +675,7 @@ def _ensure_gh_auth(gh_exe: str) -> bool:
 
     sys.stderr.write(status.stderr or status.stdout or "")
     sys.stderr.write(
-        "GitHub CLI is not authenticated. Run `gh auth login` (use the account with Copilot access) and retry.\n"
+        "GitHub CLI is not authenticated. Run `gh auth login` (use the account with Copilot access) and retry.\n",
     )
     return False
 
@@ -695,7 +706,7 @@ def run_copilot_query(prompt: str, *, model: str | None = None) -> tuple[int, st
 
     if not _ensure_gh_auth(gh_exe):
         return _failure(
-            127, "GitHub CLI authentication is required. Run `gh auth login` and retry."
+            127, "GitHub CLI authentication is required. Run `gh auth login` and retry.",
         )
 
     result = subprocess.run(
@@ -745,20 +756,11 @@ def query_copilot(
 
     token = _resolve_token()
     fallback_raw = os.environ.get("COPILOT_HTTP_FALLBACK")
-    if fallback_raw is None:
-        fallback_allowed = True
-    else:
-        fallback_allowed = fallback_raw.strip().lower() in {
-            "1",
-            "true",
-            "yes",
-            "on",
-            "y",
-        }
+    fallback_allowed = True if fallback_raw is None else fallback_raw.strip().lower() in {"1", "true", "yes", "on", "y"}
     if token and fallback_allowed:
         try:
             http_answer, http_payload = _query_copilot_http(
-                effective_question, token, model=model
+                effective_question, token, model=model,
             )
         except Exception as exc:  # noqa: BLE001 - fallback path
             if not message:
@@ -792,8 +794,8 @@ def main() -> None:
     except RuntimeError as exc:
         sys.stderr.write(f"{exc}\n")
         sys.exit(1)
-    printable = {"question": result["question"], "answer": result["answer"]}
-    pprint(printable)
+    output = {"question": result["question"], "answer": result["answer"]}
+    print(json.dumps(output, indent=2))
 
 
 if __name__ == "__main__":

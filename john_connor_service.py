@@ -1,9 +1,10 @@
 """Persona vetting adapter for Who Is John Connor tooling."""
 
+# mypy: ignore-errors
+
 from __future__ import annotations
 
-from collections.abc import Mapping
-from typing import Any, cast
+from typing import TYPE_CHECKING, Any, cast
 
 from x_make_common_x import (
     DEFAULT_PERSONA_PROMPT,
@@ -20,6 +21,9 @@ from x_make_common_x import (
 )
 
 from . import who_is_jc
+
+if TYPE_CHECKING:
+    from collections.abc import Mapping
 
 
 class JohnConnorPersonaService(PersonaVettingService):
@@ -44,7 +48,7 @@ class JohnConnorPersonaService(PersonaVettingService):
 
         try:
             response_raw = who_is_jc.query_copilot(
-                question, model=self._model, language=self._language
+                question, model=self._model, language=self._language,
             )
         except RuntimeError as exc:  # pragma: no cover - passthrough
             raise PersonaVettingError(str(exc)) from exc

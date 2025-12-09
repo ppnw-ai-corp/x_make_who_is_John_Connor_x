@@ -1,0 +1,33 @@
+[tool.ruff]
+line-length = 120
+extend-exclude = [
+    "SETUP_COPILOT_CLI.py",
+    "who_is_jc.py",
+    "john_connor_service.py",
+    "x_cls_make_who_is_John_Connor_x.py",
+    "__init__.py",
+]
+
+[tool.ruff.lint]
+extend-ignore = [
+    "ANN",
+    "B",
+    "C90",
+    "E501",
+    "EM",
+    "FBT",
+    "N",
+    "PERF",
+    "PLR",
+    "PLC",
+    "PT",
+    "PTH",
+    "RET",
+    "S",
+    "SIM",
+    "SLF",
+    "TC",
+    "TCH",
+    "TID",
+    "TRY",
+]

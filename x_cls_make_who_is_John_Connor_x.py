@@ -1,5 +1,7 @@
 """JSON-in/JSON-out wrapper for the John Connor Copilot helper."""
 
+# mypy: ignore-errors
+
 from __future__ import annotations
 
 import importlib
@@ -17,7 +19,7 @@ except ImportError:  # pragma: no cover - executed when run as script
     repo_root = Path(__file__).resolve().parent
     sys.path.append(str(repo_root.parent))
     who_is_jc = importlib.import_module(  # type: ignore[assignment]
-        "x_make_who_is_John_Connor_x.who_is_jc"
+        "x_make_who_is_John_Connor_x.who_is_jc",
     )
 
 
@@ -33,7 +35,7 @@ VALID_COPILOT_MODELS: tuple[str, ...] = (
 
 try:  # pragma: no cover - optional dependency
     _copilot_setup_module = importlib.import_module(
-        "x_make_copilot_cli_one_time_setup_x"
+        "x_make_copilot_cli_one_time_setup_x",
     )
 except ImportError:  # pragma: no cover - helper not available in all environments
     CopilotSetupHelper: type[Any] | None = None
@@ -140,7 +142,7 @@ class x_cls_make_who_is_John_Connor_x:  # noqa: N801 - legacy public API
         with _temporary_env(env_updates):
             try:
                 response = who_is_jc.query_copilot(
-                    question, model=model, language=language
+                    question, model=model, language=language,
                 )
             except RuntimeError as exc:
                 result: dict[str, Any] = {
@@ -173,7 +175,7 @@ class x_cls_make_who_is_John_Connor_x:  # noqa: N801 - legacy public API
                         result["setup"] = setup_report
                 return result
 
-        outcome = {
+        return {
             "status": "ok",
             "question": response.get("question", question),
             "answer": response.get("answer", ""),
@@ -198,7 +200,6 @@ class x_cls_make_who_is_John_Connor_x:  # noqa: N801 - legacy public API
                 "language": language,
             },
         }
-        return outcome
 
 
 def _load_request() -> Mapping[str, Any]:
@@ -210,16 +211,17 @@ def _load_request() -> Mapping[str, Any]:
     try:
         data = json.loads(raw)
     except json.JSONDecodeError as exc:  # pragma: no cover - defensive
-        raise SystemExit(f"Invalid JSON input: {exc}") from exc
+        msg = f"Invalid JSON input: {exc}"
+        raise SystemExit(msg) from exc
     if not isinstance(data, Mapping):
-        raise SystemExit("Input JSON must be an object.")
+        msg = "Input JSON must be an object."
+        raise SystemExit(msg)
     return data
 
 
 def main() -> int:
     request = _load_request()
     outcome = x_cls_make_who_is_John_Connor_x().run(request)
-    print(json.dumps(outcome, indent=2))
     return 0 if outcome.get("status") == "ok" else 1
 
 

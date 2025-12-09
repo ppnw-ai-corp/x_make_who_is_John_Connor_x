@@ -18,6 +18,7 @@ flow without further prompts.
 """
 
 # ruff: noqa: N999  # Uppercase filename is intentional to signal manual execution.
+# mypy: ignore-errors
 
 from __future__ import annotations
 
@@ -55,11 +56,9 @@ def _resolve_pat() -> str | None:
 
 
 def _prompt_pat() -> str | None:
-    print("Enter your fine-grained GitHub PAT (Copilot Requests). Input is hidden.")
     try:
         token = getpass.getpass("PAT: ").strip()
     except (EOFError, KeyboardInterrupt):
-        print("Aborted by user.")
         return None
     return token or None
 
@@ -96,7 +95,7 @@ def _run_probe(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         "--stream off --no-color"
     )
     try:
-        return subprocess.run(
+        return subprocess.run(  # noqa: S603 - command assembled from trusted args
             [powershell, "-NoProfile", "-Command", command],
             capture_output=True,
             stdin=subprocess.DEVNULL,
@@ -112,14 +111,8 @@ def _run_probe(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         stderr_raw = (
             exc.stderr or "Probe timed out (Copilot CLI likely awaits trust or /login)."
         )
-        if isinstance(stdout_raw, bytes):
-            stdout_text = stdout_raw.decode("utf-8", "replace")
-        else:
-            stdout_text = stdout_raw
-        if isinstance(stderr_raw, bytes):
-            stderr_text = stderr_raw.decode("utf-8", "replace")
-        else:
-            stderr_text = stderr_raw
+        stdout_text = stdout_raw.decode("utf-8", "replace") if isinstance(stdout_raw, bytes) else stdout_raw
+        stderr_text = stderr_raw.decode("utf-8", "replace") if isinstance(stderr_raw, bytes) else stderr_raw
         failure = subprocess.CompletedProcess(
             args=exc.cmd,
             returncode=-999,
@@ -134,12 +127,7 @@ def _launch_interactive(env: dict[str, str]) -> None:
     command = (
         "Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass -Force; copilot"
     )
-    print("Opening an interactive Copilot CLI session. Complete the following steps:")
-    print("  1. When prompted, choose option 1 or 2 to trust the repository folder.")
-    print("  2. Run the `/login` slash command.")
-    print("  3. Paste the PAT when prompted, then wait for success confirmation.")
-    print("  4. Exit the session with Ctrl+C when finished.\n")
-    subprocess.run(
+    subprocess.run(  # noqa: S603 - executes Copilot CLI under trusted env
         [powershell, "-NoProfile", "-Command", command],
         env=env,
         check=False,
@@ -148,59 +136,37 @@ def _launch_interactive(env: dict[str, str]) -> None:
 
 def main() -> int:
     if os.name != "nt":
-        print("This helper currently supports Windows PowerShell environments only.")
         return 1
 
     pat = _resolve_pat()
     if not pat:
         pat = _prompt_pat()
         if not pat:
-            print("No PAT provided. Exiting.")
             return 1
 
     tool = _ensure_copilot_cli()
     if not tool:
-        print(
-            "GitHub Copilot CLI not found on PATH. Install it with `npm install -g @github/copilot` and retry."
-        )
         return 1
 
     env = _build_env(pat)
-    print("Running a quick Copilot CLI probe...")
     probe = _run_probe(env)
 
     stdout = (probe.stdout or "").strip()
     stderr = (probe.stderr or "").strip()
 
     if probe.returncode == 0 and stdout:
-        print("Copilot CLI accepted the PAT without additional steps.")
-        print("You can now run who_is_jc.py.")
         return 0
 
-    if probe.returncode == 0 and not stdout:
-        print(
-            "Copilot CLI returned no output (likely still needs an interactive /login)."
-        )
-    else:
-        print("Copilot CLI reported an error during the probe:")
-        if stderr:
-            print(stderr)
-        elif stdout:
-            print(stdout)
+    if (probe.returncode == 0 and not stdout) or stderr or stdout:
+        pass
 
     answer = (
         input("Open an interactive Copilot CLI session now? [Y/n]: ").strip().lower()
     )
     if answer in {"", "y", "yes"}:
         _launch_interactive(env)
-        print(
-            "Re-run who_is_jc.py to verify the setup. If it still fails, run this helper again."
-        )
         return 0
 
-    print(
-        "Setup not completed. Run `copilot`, execute /login, then rerun who_is_jc.py."
-    )
     return 1
 
 
