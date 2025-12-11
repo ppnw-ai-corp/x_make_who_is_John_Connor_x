@@ -142,7 +142,9 @@ class x_cls_make_who_is_John_Connor_x:  # noqa: N801 - legacy public API
         with _temporary_env(env_updates):
             try:
                 response = who_is_jc.query_copilot(
-                    question, model=model, language=language,
+                    question,
+                    model=model,
+                    language=language,
                 )
             except RuntimeError as exc:
                 result: dict[str, Any] = {

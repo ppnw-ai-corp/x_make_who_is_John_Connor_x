@@ -70,7 +70,10 @@ def _failure(code: int, message: str) -> tuple[int, str, str]:
 
 
 def _query_copilot_http(
-    question: str, token: str, *, model: str | None = None,
+    question: str,
+    token: str,
+    *,
+    model: str | None = None,
 ) -> tuple[str, dict[str, object]]:
     endpoint = os.environ.get(
         "COPILOT_API_URL",
@@ -234,16 +237,18 @@ def _install_copilot_cli_via_winget() -> bool:
         return False
     sys.stderr.write("Attempting to install GitHub Copilot CLI via winget...\n")
     try:
-        attempt = subprocess.run(  # noqa: S603 - invokes system installer with fixed args
-            [
-                winget,
-                "install",
-                "GitHub.CopilotCLI",
-                "--accept-source-agreements",
-                "--accept-package-agreements",
-            ],
-            check=False,
-            timeout=120,
+        attempt = (
+            subprocess.run(  # noqa: S603 - invokes system installer with fixed args
+                [
+                    winget,
+                    "install",
+                    "GitHub.CopilotCLI",
+                    "--accept-source-agreements",
+                    "--accept-package-agreements",
+                ],
+                check=False,
+                timeout=120,
+            )
         )
     except subprocess.TimeoutExpired:
         sys.stderr.write("winget install for Copilot CLI timed out.\n")
@@ -344,7 +349,9 @@ def _install_gh_cli_via_msi() -> bool:
     try:
         with tempfile.NamedTemporaryFile(suffix=".msi", delete=False) as handle:
             tmp_path = Path(handle.name)
-        urllib.request.urlretrieve(url, str(tmp_path))  # noqa: S310 - trusted release URL
+        urllib.request.urlretrieve(
+            url, str(tmp_path)
+        )  # noqa: S310 - trusted release URL
         sys.stderr.write("Download complete. Installing...\n")
         system_root = Path(os.environ.get("SYSTEMROOT") or r"C:\\Windows")
         msiexec = system_root / "System32" / "msiexec.exe"
@@ -385,7 +392,9 @@ def _find_gh_executable() -> str | None:
     gh_candidates.append(Path(program_files) / "GitHub CLI" / "gh.exe")
     local_app_data = os.environ.get("LOCALAPPDATA")
     if local_app_data:
-        gh_candidates.append(Path(local_app_data) / "Programs" / "GitHub CLI" / "gh.exe")
+        gh_candidates.append(
+            Path(local_app_data) / "Programs" / "GitHub CLI" / "gh.exe"
+        )
     path_dirs = os.environ.get("PATH", "").split(os.pathsep)
     gh_candidates.extend(Path(d) / "gh.exe" for d in path_dirs if d)
 
@@ -706,7 +715,8 @@ def run_copilot_query(prompt: str, *, model: str | None = None) -> tuple[int, st
 
     if not _ensure_gh_auth(gh_exe):
         return _failure(
-            127, "GitHub CLI authentication is required. Run `gh auth login` and retry.",
+            127,
+            "GitHub CLI authentication is required. Run `gh auth login` and retry.",
         )
 
     result = subprocess.run(
@@ -756,11 +766,17 @@ def query_copilot(
 
     token = _resolve_token()
     fallback_raw = os.environ.get("COPILOT_HTTP_FALLBACK")
-    fallback_allowed = True if fallback_raw is None else fallback_raw.strip().lower() in {"1", "true", "yes", "on", "y"}
+    fallback_allowed = (
+        True
+        if fallback_raw is None
+        else fallback_raw.strip().lower() in {"1", "true", "yes", "on", "y"}
+    )
     if token and fallback_allowed:
         try:
             http_answer, http_payload = _query_copilot_http(
-                effective_question, token, model=model,
+                effective_question,
+                token,
+                model=model,
             )
         except Exception as exc:  # noqa: BLE001 - fallback path
             if not message:

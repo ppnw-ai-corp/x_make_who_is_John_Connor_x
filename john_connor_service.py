@@ -48,7 +48,9 @@ class JohnConnorPersonaService(PersonaVettingService):
 
         try:
             response_raw = who_is_jc.query_copilot(
-                question, model=self._model, language=self._language,
+                question,
+                model=self._model,
+                language=self._language,
             )
         except RuntimeError as exc:  # pragma: no cover - passthrough
             raise PersonaVettingError(str(exc)) from exc

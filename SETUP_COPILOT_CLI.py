@@ -111,8 +111,16 @@ def _run_probe(env: dict[str, str]) -> subprocess.CompletedProcess[str]:
         stderr_raw = (
             exc.stderr or "Probe timed out (Copilot CLI likely awaits trust or /login)."
         )
-        stdout_text = stdout_raw.decode("utf-8", "replace") if isinstance(stdout_raw, bytes) else stdout_raw
-        stderr_text = stderr_raw.decode("utf-8", "replace") if isinstance(stderr_raw, bytes) else stderr_raw
+        stdout_text = (
+            stdout_raw.decode("utf-8", "replace")
+            if isinstance(stdout_raw, bytes)
+            else stdout_raw
+        )
+        stderr_text = (
+            stderr_raw.decode("utf-8", "replace")
+            if isinstance(stderr_raw, bytes)
+            else stderr_raw
+        )
         failure = subprocess.CompletedProcess(
             args=exc.cmd,
             returncode=-999,
